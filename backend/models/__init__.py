@@ -1,0 +1,1 @@
+# AI Models package for HomeInspector AI
