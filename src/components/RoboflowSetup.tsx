@@ -143,7 +143,7 @@ const RoboflowSetup: React.FC<RoboflowSetupProps> = ({
             </li>
             <li className="flex items-start">
               <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-1 rounded mr-2 mt-0.5">3</span>
-              Copy your "Publishable Key" and paste it above
+              Copy your "Publishable Key\" and paste it above
             </li>
           </ol>
         </div>
