@@ -1,5 +1,3 @@
-import { Roboflow } from 'roboflow-js';
-
 export interface RoboflowDetection {
   id: string;
   type: 'mold';
@@ -21,15 +19,27 @@ export class RoboflowService {
   private rf: any = null;
   private model: any = null;
   private isInitialized = false;
+  private apiKey: string | null = null;
 
-  constructor(private apiKey?: string) {
-    if (apiKey) {
-      this.initialize(apiKey);
-    }
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || null;
   }
 
   async initialize(apiKey: string): Promise<boolean> {
     try {
+      // Store the API key
+      this.apiKey = apiKey;
+      
+      // For demo mode, just mark as initialized without actual Roboflow connection
+      if (apiKey === 'demo') {
+        this.isInitialized = true;
+        console.log('Demo mode initialized - Roboflow features disabled');
+        return true;
+      }
+
+      // Dynamically import roboflow-js to avoid initialization issues
+      const { Roboflow } = await import('roboflow-js');
+      
       this.rf = new Roboflow({
         publishable_key: apiKey
       });
@@ -43,29 +53,41 @@ export class RoboflowService {
     } catch (error) {
       console.error('Failed to initialize Roboflow:', error);
       this.isInitialized = false;
-      return false;
+      this.rf = null;
+      this.model = null;
+      throw new Error(`Roboflow initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   isAvailable(): boolean {
-    return this.isInitialized && this.model !== null;
+    return this.isInitialized && (this.apiKey === 'demo' || this.model !== null);
   }
 
   async detectMold(imageElement: HTMLImageElement | HTMLCanvasElement): Promise<RoboflowDetection[]> {
-    if (!this.isAvailable()) {
+    // If in demo mode, return mock detections
+    if (this.apiKey === 'demo') {
+      return this.generateMockDetections(imageElement);
+    }
+
+    if (!this.isAvailable() || !this.model) {
       throw new Error('Roboflow model not initialized');
     }
 
     try {
       const predictions = await this.model.detect(imageElement);
       
-      if (!predictions || !predictions.length) {
+      if (!predictions || !Array.isArray(predictions) || predictions.length === 0) {
         return [];
       }
 
       return predictions.map((prediction: any, index: number) => {
-        const confidence = prediction.confidence;
-        const area = (prediction.width * prediction.height) / (imageElement.width * imageElement.height);
+        const confidence = prediction.confidence || 0;
+        const width = prediction.width || 50;
+        const height = prediction.height || 50;
+        const x = prediction.x || 0;
+        const y = prediction.y || 0;
+        
+        const area = (width * height) / (imageElement.width * imageElement.height);
         
         return {
           id: `mold_${Date.now()}_${index}`,
@@ -73,21 +95,51 @@ export class RoboflowService {
           severity: this.determineSeverity(confidence, area),
           confidence,
           location: {
-            x: (prediction.x - prediction.width / 2) / imageElement.width,
-            y: (prediction.y - prediction.height / 2) / imageElement.height,
-            width: prediction.width / imageElement.width,
-            height: prediction.height / imageElement.height
+            x: Math.max(0, Math.min(1, (x - width / 2) / imageElement.width)),
+            y: Math.max(0, Math.min(1, (y - height / 2) / imageElement.height)),
+            width: Math.min(1, width / imageElement.width),
+            height: Math.min(1, height / imageElement.height)
           },
-          description: this.generateDescription(prediction.class, confidence),
+          description: this.generateDescription(prediction.class || 'mold', confidence),
           recommendations: this.getMoldRecommendations(this.determineSeverity(confidence, area)),
-          class: prediction.class,
+          class: prediction.class || 'mold',
           rawPrediction: prediction
         };
       });
     } catch (error) {
       console.error('Error during mold detection:', error);
-      throw error;
+      throw new Error(`Mold detection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private generateMockDetections(imageElement: HTMLImageElement | HTMLCanvasElement): RoboflowDetection[] {
+    // Generate 0-2 mock detections for demo mode
+    const numDetections = Math.floor(Math.random() * 3);
+    const detections: RoboflowDetection[] = [];
+
+    for (let i = 0; i < numDetections; i++) {
+      const confidence = 0.6 + Math.random() * 0.3; // 60-90% confidence
+      const area = 0.01 + Math.random() * 0.05; // 1-6% of image area
+      
+      detections.push({
+        id: `demo_mold_${Date.now()}_${i}`,
+        type: 'mold' as const,
+        severity: this.determineSeverity(confidence, area),
+        confidence,
+        location: {
+          x: Math.random() * 0.7 + 0.1, // 10-80% from left
+          y: Math.random() * 0.7 + 0.1, // 10-80% from top
+          width: Math.sqrt(area) + Math.random() * 0.1,
+          height: Math.sqrt(area) + Math.random() * 0.1
+        },
+        description: `Demo: Mold growth detected with ${Math.round(confidence * 100)}% confidence`,
+        recommendations: this.getMoldRecommendations(this.determineSeverity(confidence, area)),
+        class: 'mold',
+        rawPrediction: { demo: true, confidence, area }
+      });
+    }
+
+    return detections;
   }
 
   private determineSeverity(confidence: number, area: number): 'low' | 'medium' | 'high' | 'critical' {
